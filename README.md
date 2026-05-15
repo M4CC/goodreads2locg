@@ -50,3 +50,4 @@ python main.py "GOODREADS_URL" "LOCG_SERIES_URL"
 - It also sets format to `Trade Paperback` and dimensions to `Oversized`.
 - Submitted results are appended to `done.json`.
 - Failed submissions are recorded in `skipped.json`.
+# goodreads2locg
