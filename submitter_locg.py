@@ -652,9 +652,19 @@ async def _submit_issue(page, series_url: str, issue: dict) -> dict:
         current_url = page.url
         log.info(f"After submit, URL: {current_url}")
 
-        error_el = await page.query_selector(".alert-danger, .error-message, .alert-error")
+        await page.wait_for_timeout(1000)
+
+        error_el = None
+        try:
+            error_el = await page.query_selector(".alert-danger, .error-message, .alert-error")
+        except Exception:
+            error_el = None
+
         if error_el:
-            error_text = await error_el.inner_text()
+            try:
+                error_text = await error_el.inner_text()
+            except Exception:
+                error_text = "Unknown submission error"
             return {"goodreads_title": name, "success": False, "error": error_text.strip(), "locg_series_url": series_url, "submitted_url": current_url}
 
         page_text = ""
