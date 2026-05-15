@@ -5,13 +5,15 @@ from pathlib import Path
 class Config:
     def __init__(
         self,
-        goodreads_session_cookie: str = "",
+        goodreads_email: str = "",
+        goodreads_password: str = "",
         locg_username: str = "",
         locg_password: str = "",
         headless: bool = False,
         delay_between_ms: int = 1500,
     ):
-        self.goodreads_session_cookie = goodreads_session_cookie
+        self.goodreads_email = goodreads_email
+        self.goodreads_password = goodreads_password
         self.locg_username = locg_username
         self.locg_password = locg_password
         self.headless = headless
@@ -24,7 +26,8 @@ class Config:
 
         raw = json.loads(path.read_text(encoding="utf-8"))
         return Config(
-            goodreads_session_cookie=raw.get("goodreads_session_cookie", ""),
+            goodreads_email=raw.get("goodreads_email", ""),
+            goodreads_password=raw.get("goodreads_password", ""),
             locg_username=raw.get("locg_username", ""),
             locg_password=raw.get("locg_password", ""),
             headless=bool(raw.get("headless", False)),

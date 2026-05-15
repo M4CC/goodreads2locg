@@ -1,0 +1,8 @@
+{
+  "goodreads_email": "YOUR_GOODREADS_EMAIL",
+  "goodreads_password": "YOUR_GOODREADS_PASSWORD",
+  "locg_username": "YOUR_LOCG_USERNAME",
+  "locg_password": "YOUR_LOCG_PASSWORD",
+  "headless": false,
+  "delay_between_ms": 1500
+}

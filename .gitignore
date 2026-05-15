@@ -5,6 +5,7 @@ __pycache__/
 pip-wheel-metadata/
 *.log
 *.json
+!config.example.json
 *.png
 *.html
 *.db
@@ -12,4 +13,4 @@ pip-wheel-metadata/
 venv/
 .env
 .DS_Store
-config.json
+*.zip

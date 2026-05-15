@@ -9,8 +9,12 @@ import argparse
 import asyncio
 import json
 import logging
+import re
 import sys
+import warnings
 from pathlib import Path
+
+warnings.filterwarnings("ignore", category=Warning, module="urllib3")
 
 from config import Config
 from submitter_locg import (
@@ -19,18 +23,29 @@ from submitter_locg import (
     submit_issue_from_goodreads,
 )
 
+_stream_handler = logging.StreamHandler()
+_stream_handler.setLevel(logging.INFO)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler("pipeline.log"),
-        logging.StreamHandler(),
+        _stream_handler,
     ],
 )
 log = logging.getLogger(__name__)
 
 DONE_FILE = Path("done.json")
 SKIP_FILE = Path("skipped.json")
+UI_SESSION_FILE = Path("ui_session.json")
+
+
+def _contributions_url(locg_series_url: str) -> str:
+    m = re.search(r"/series/(\d+)/", locg_series_url)
+    if m:
+        return f"https://leagueofcomicgeeks.com/community/contributions/new-issues?series_id={m.group(1)}"
+    return locg_series_url
 
 
 def load_json(path: Path) -> list:
@@ -41,6 +56,123 @@ def load_json(path: Path) -> list:
 
 def save_json(path: Path, data):
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def load_session() -> dict:
+    if UI_SESSION_FILE.exists():
+        try:
+            return json.loads(UI_SESSION_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def save_session(session: dict):
+    UI_SESSION_FILE.write_text(json.dumps(session, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+_ROLE_LABELS = {
+    "1": "Writer", "16": "Story", "2": "Artist", "9": "Penciller",
+    "10": "Inker", "8": "Colorist", "7": "Letterer", "4": "Editor",
+    "21": "Translator", "3": "Cover Artist", "19": "Designer",
+}
+
+
+def print_summary(issue: dict):
+    print()
+    print("─" * 52)
+    print("  Issue Summary")
+    print("─" * 52)
+    fields = [
+        ("Issue #",      issue.get("issue_number")),
+        ("Title",        issue.get("goodreads_title")),
+        ("Release date", issue.get("release_date")),
+        ("Language",     issue.get("language")),
+        ("Format",       issue.get("format")),
+        ("Dimensions",   "Oversized"),
+        ("Pages",        issue.get("pages")),
+        ("ISBN-13",      issue.get("isbn13")),
+        ("ISBN-10",      issue.get("isbn10")),
+        ("Cover",        issue.get("cover_url")),
+        ("Notes",        issue.get("moderator_comment")),
+    ]
+    for label, value in fields:
+        if value:
+            print(f"  {label:<14} {value}")
+
+    contributors = issue.get("contributors") or []
+    if contributors:
+        print(f"  {'Credits':<14}", end="")
+        for i, c in enumerate(contributors):
+            roles = ", ".join(_ROLE_LABELS.get(r, r) for r in (c.get("role_values") or []))
+            prefix = " " * 16 if i > 0 else ""
+            print(f"{prefix}{c['name']} ({roles})")
+    else:
+        print(f"  {'Credits':<14} (none)")
+
+    print("─" * 52)
+    print()
+
+
+async def interactive_flow(cfg: Config):
+    while True:
+        session = load_session()
+        last_series = session.get("last_locg_series_url", "")
+
+        print()
+        if last_series:
+            answer = input(f"Use last series URL? {last_series}\n[y/n]: ").strip().lower()
+            locg_series_url = last_series if answer == "y" else input("LOCG series URL: ").strip()
+        else:
+            locg_series_url = input("LOCG series URL: ").strip()
+
+        if not locg_series_url:
+            print("No series URL provided. Exiting.")
+            return
+
+        goodreads_url = input("Goodreads URL: ").strip()
+        if not goodreads_url:
+            print("No Goodreads URL provided. Exiting.")
+            return
+
+        session["last_locg_series_url"] = locg_series_url
+        save_session(session)
+
+        _stream_handler.setLevel(logging.WARNING)
+
+        print("\nSubmitting to LOCG...")
+        result = await submit_issue_from_goodreads(goodreads_url, locg_series_url, cfg)
+
+        _stream_handler.setLevel(logging.INFO)
+
+        done = load_json(DONE_FILE)
+        skipped = load_json(SKIP_FILE)
+
+        if result.get("success"):
+            done.append(result)
+            save_json(DONE_FILE, done)
+            print_summary(result.get("issue_data") or {})
+            print(f"Submission completed.")
+            print(f"View submissions: {_contributions_url(locg_series_url)}")
+        else:
+            skipped.append({
+                "goodreads_title": result.get("goodreads_title", ""),
+                "goodreads_url": goodreads_url,
+                "locg_series_url": locg_series_url,
+                "reason": result.get("error", "issue_submit_failed"),
+                "details": result,
+            })
+            save_json(SKIP_FILE, skipped)
+            print(f"\nSubmission failed: {result.get('error')}")
+
+        another = input("\nSubmit another issue? [y/n]: ").strip().lower()
+        if another != "y":
+            print()
+            print("╔══════════════════════════╗")
+            print("║     Happy reading! 📚     ║")
+            print("╚══════════════════════════╝")
+            print()
+            return
 
 
 def parse_args():
@@ -96,25 +228,26 @@ async def main():
     goodreads_issue_url = args.goodreads_issue_url_flag or args.goodreads_issue_url
     locg_series_url = args.locg_series_url_flag or args.locg_series_url
 
+    # No args → interactive flow
+    if not goodreads_issue_url and not locg_series_url and not args.preview and not args.review:
+        await interactive_flow(cfg)
+        return
+
     if not goodreads_issue_url or not locg_series_url:
         log.error(
             "Missing required URLs.\n"
             "Usage: python main.py GOODREADS_ISSUE_URL LOCG_SERIES_URL\n"
-            "Or: python main.py --goodreads-issue-url URL --locg-series-url URL"
+            "Or just: python main.py  (for interactive mode)"
         )
         sys.exit(1)
 
     if args.preview:
         log.info("=== Previewing Goodreads issue metadata (no submission) ===")
-        preview_data = await preview_issue_from_goodreads(goodreads_issue_url, cfg)
+        preview_data = await preview_issue_from_goodreads(goodreads_issue_url)
         if not preview_data:
             log.error("Failed to preview Goodreads issue metadata.")
             sys.exit(1)
-        print(json.dumps({
-            "goodreads_issue_url": goodreads_issue_url,
-            "locg_series_url": locg_series_url,
-            "issue_data": preview_data,
-        }, indent=2, ensure_ascii=False))
+        print_summary(preview_data)
         return
 
     if args.review:
