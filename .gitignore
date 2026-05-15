@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+pip-wheel-metadata/
+*.log
+*.json
+*.png
+*.html
+*.db
+.venv/
+venv/
+.env
+.DS_Store
+config.json
